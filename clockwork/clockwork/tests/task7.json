@@ -1,0 +1,7 @@
+[
+  {"input": [0],   "output": [0]},
+  {"input": [9],   "output": [3]},
+  {"input": [16],  "output": [4]},
+  {"input": [28],  "output": [5]},
+  {"input": [167], "output": [12]}
+]
