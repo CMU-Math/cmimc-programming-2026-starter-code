@@ -6,7 +6,7 @@ A competitive coin-collection game where a **Bot** and a **Ghost** traverse a gr
 
 ## Installation
 
-Python 3.13+ is required.
+Python 3.12 is required.
 
 **With uv (recommended):**
 ```bash
