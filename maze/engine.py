@@ -43,11 +43,12 @@ def sizeof_validator(obj, _getsizeof=sys.getsizeof):
 
 
 class Slot:
-    def __init__(self, alpha):
+    def __init__(self, alpha, rng):
+        self.rng = np.random.default_rng(rng.integers(0, 2**63))
         self.alpha = alpha
 
-    def get(self, rng):
-        x = rng.random() or 1e-300
+    def get(self):
+        x = self.rng.random() or 1e-300
         y = min(self.alpha * 10, self.alpha // x)
         return int(y)
 
@@ -197,11 +198,13 @@ class Graph:
         children = [[] for _ in range(self.n)]
         tree_degree = [0] * self.n  # final degree in the tree
 
-        # Step 1: random spanning tree on the internals, rooted at internals[0]
+        # Step 1: random spanning tree on the internals, rooted at internals[0].
+        # Cap tree_degree at 3 so step 2's leaf demand is exactly I + 2 ≤ n - I.
         root = internals[0]
         in_tree = [root]
         for v in internals[1:]:
-            p = int(rng.choice(in_tree))
+            available = [p for p in in_tree if tree_degree[p] < 3]
+            p = int(rng.choice(available))
             children[p].append(v)
             tree_degree[p] += 1
             tree_degree[v] += 1  # parent edge
@@ -258,7 +261,7 @@ class Graph:
 
         for i in range(self.n):
             if rng.random() < slot_sparsity:
-                self.set_slot(i, Slot(int(rng.choice(alpha_list))))
+                self.set_slot(i, Slot(int(rng.choice(alpha_list)), rng))
 
     def slots_distance(self, start: int, distance_base: float, distance_scaling: float, alpha_scaling: int, rng):
         G = nx.Graph()
@@ -274,7 +277,7 @@ class Graph:
                 continue
             if rng.random() < (distance_base + distance_scaling * distances[i]):
                 next_slot = int(rng.random() * (alpha_scaling * distances[i]))
-                self.set_slot(i, Slot(next_slot))
+                self.set_slot(i, Slot(next_slot, rng))
                 best_slot = max(best_slot, next_slot)
         return best_slot
 
@@ -330,13 +333,22 @@ class MazeSimulator:
         # adj_list = [self.graph.nodes[i].neighbors for i in range(size)]
         # visualize_graph(size, adj_list)
 
+        # Random vertex permutation to hide internal labels from bot/ghost.
+        # Vertex 0 stays fixed (it's the documented start); others are shuffled.
+        externals = list(range(1, size))
+        self.rng.shuffle(externals)
+        self.perm = [0] + externals          # perm[internal] = external
+        self.inv_perm = [0] * size
+        for i, e in enumerate(self.perm):
+            self.inv_perm[e] = i
+
         self.most_data = 0
         self.size = size
         self.bot = bot
         self.ghost = ghost
         self.coins = 0
-        self.bot_info = {"pos": 0, "last_pos": 0, "data": None}
-        self.ghost_info = {"pos": 0, "last_pos": 0, "data": None}
+        self.bot_info = {"pos": 0, "last_pos": -1, "data": None}
+        self.ghost_info = {"pos": 0, "last_pos": -1, "data": None}
         self.total_steps = steps
         self.current_step = 0
         self.coins_stored = {}
@@ -347,9 +359,10 @@ class MazeSimulator:
         self.current_step += 1
         # First simulate the bot and get its step
         bot_pos = self.bot_info["pos"]
+        bot_ext_neighbors = [self.perm[n] for n in self.graph.nodes[bot_pos].neighbors]
         try:
-            ret = self.bot(self.current_step, self.total_steps, bot_pos, 
-                        self.bot_info["last_pos"], list(self.graph.nodes[bot_pos].neighbors), 
+            ret = self.bot(self.current_step, self.total_steps, self.perm[bot_pos], 
+                        self.perm[self.bot_info["last_pos"]], bot_ext_neighbors, 
                         self.graph.nodes[bot_pos].slot is not None, self.coins_stored.get(bot_pos, 0), self.bot_info["data"])
         except Exception as e:
             raise Exception(f"Your SubmissionBot function raised an exception: {str(e)}")
@@ -365,9 +378,10 @@ class MazeSimulator:
 
         # Now simulate the ghost and get its step
         ghost_pos = self.ghost_info["pos"]
+        ghost_ext_neighbors = [self.perm[n] for n in self.graph.nodes[ghost_pos].neighbors]
         try:
-            ret = self.ghost(self.current_step, self.total_steps, ghost_pos, 
-                        self.ghost_info["last_pos"], list(self.graph.nodes[ghost_pos].neighbors), 
+            ret = self.ghost(self.current_step, self.total_steps, self.perm[ghost_pos], 
+                        self.perm[self.ghost_info["last_pos"]], ghost_ext_neighbors, 
                         self.graph.nodes[ghost_pos].slot is not None, self.coins_stored.get(ghost_pos, 0), self.ghost_info["data"])
         except Exception as e:
             raise Exception(f"Your SubmissionGhost function raised an exception: {str(e)}")
@@ -389,24 +403,28 @@ class MazeSimulator:
         if type(ghost_target) is not int:
             raise Exception(f"Your ghost returned a non-int action: {ghost_target!r}")
 
-        if bot_target != -1 and bot_target not in self.graph.nodes[bot_pos].neighbors:
-            raise Exception(f"Your bot returned an invalid action: {bot_target}")
+        if bot_target != -1:
+            if bot_target not in bot_ext_neighbors:
+                raise Exception(f"Your bot returned an invalid action: {bot_target}")
+            bot_target = self.inv_perm[bot_target]
 
-        if ghost_target != -1 and ghost_target not in self.graph.nodes[ghost_pos].neighbors:
-            raise Exception(f"Your bot returned an invalid action: {ghost_target}")
+        if ghost_target != -1:
+            if ghost_target not in ghost_ext_neighbors:
+                raise Exception(f"Your ghost returned an invalid action: {ghost_target}")
+            ghost_target = self.inv_perm[ghost_target]
 
         if self.coins_stored.get(bot_pos, 0) > 0:
             self.coins += self.coins_stored[bot_pos]
             self.coins_stored[bot_pos] = 0
         # Now update for slot pulls and positions
         if bot_target == -1 and self.graph.nodes[bot_pos].slot is not None:
-            spin = self.graph.nodes[bot_pos].slot.get(self.rng)
+            spin = self.graph.nodes[bot_pos].slot.get()
             self.coins_stored[bot_pos] = self.coins_stored.get(bot_pos, 0) + spin
         elif bot_target in self.graph.nodes[bot_pos].neighbors:
             self.bot_info["pos"] = bot_target
         
         if ghost_target == -1 and (bot_target != -1 or bot_pos != ghost_pos) and self.graph.nodes[ghost_pos].slot is not None:
-            spin = self.graph.nodes[ghost_pos].slot.get(self.rng)
+            spin = self.graph.nodes[ghost_pos].slot.get()
             self.coins_stored[ghost_pos] = min(50, self.coins_stored.get(ghost_pos, 0) + spin)
         elif ghost_target in self.graph.nodes[ghost_pos].neighbors:
             self.ghost_info["pos"] = ghost_target
