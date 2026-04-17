@@ -1,0 +1,7 @@
+[
+  {"input": [10, 3],    "output": [7]},
+  {"input": [100, 1],   "output": [99]},
+  {"input": [50, 50],   "output": [0]},
+  {"input": [200, 150], "output": [50]},
+  {"input": [7, 2],     "output": [5]}
+]
