@@ -127,8 +127,16 @@ class GameEngine:
             self._factories[:] = 0
 
     def get_rankings(self) -> List[int]:
-        """Return player IDs sorted by lemon count (descending)."""
-        return np.argsort(-self._lemons).tolist()
+        """Return player IDs ordered by placement.
+
+        Winners (if any) are placed first, sorted by their own lemon count.
+        Remaining players follow, sorted by post-liquidation lemon count.
+        """
+        winner_set = set(self._winner)
+        return sorted(
+            range(self._game_params["num_players"]),
+            key=lambda i: (0 if i in winner_set else 1, -float(self._lemons[i])),
+        )
 
     def get_state(self) -> Dict[str, Any]:
         """Return current game state."""
