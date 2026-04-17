@@ -25,4 +25,5 @@ class SubmissionPlayer(Player):
         # Buy random factories with whatever lemons we have
         num_to_buy = math.floor(your_lemons // self.buy_price)
         buy = [random.randint(1, self.max_factory_id) for _ in range(num_to_buy)]
+        logging.debug(f"Round {round_number}: buying {buy}")  # Example of how to output debug info for a submission
         return buy, [], []
