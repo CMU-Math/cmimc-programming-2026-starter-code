@@ -225,7 +225,7 @@ td:first-child{color:var(--text3)}
       </div>
       <div class="spd-row">
         <span>Speed</span>
-        <input type="range" min="1" max="180" value="60" id="spd" step="1" oninput="updSpd(this.value)">
+        <input type="range" min="1" max="360" value="60" id="spd" step="1" oninput="updSpd(this.value)">
         <span class="spd-val" id="sdl">60 t/s</span>
       </div>
       <label class="poc-row">
@@ -293,7 +293,7 @@ function loadEx(name){
 }
 
 let cfg=null,st=null;
-let running=false,tps=60,lastMs=0,runRaf=null;
+let running=false,tps=60,runRaf=null,tickTimer=null;
 let animating=false,animList=null,animStart=0,animDur=500,animCb=null;
 
 /* ─ validation ─────────────────────────────────────────── */
@@ -306,7 +306,7 @@ function valCfg(c){
   if(c.rings[0].length!==1) throw Error('Ring 0 must have exactly one marker');
   for(let i=0;i<c.rings.length;i++){
     const markers=c.rings[i];
-    if(!Array.isArray(markers)||!markers.length) throw Error('Ring '+i+' needs at least one marker');
+    if(!Array.isArray(markers)) throw Error('Ring '+i+' must be an array');
     const ps=new Set();
     for(const m of markers){
       if(!Number.isInteger(m.position)||m.position<0||m.position>359) throw Error('Ring '+i+': position must be integer 0-359');
@@ -479,36 +479,35 @@ function smartStep(){
 }
 
 /* ─ run loop ────────────────────────────────────────────── */
-function runFrame(ts){
-  if(!running)return;
-  if(st.halted){stopRun();return;}
-  if(!animating){
-    const iv=1000/tps;
-    if(ts-lastMs>=iv){
-      lastMs=ts;
-      const aevs=doOneTick();
-      updatePanel();
-      if(aevs.length>0){
-        const dur=document.getElementById('poc').checked?650:Math.min(360,iv*0.65);
-        startAnim(aevs,dur,null);
-      }
-    }
+function runTick(){
+  if(!running||st.halted){stopRun();return;}
+  if(animating)return;
+  const aevs=doOneTick();
+  updatePanel();
+  if(aevs.length>0){
+    const dur=document.getElementById('poc').checked?650:Math.min(360,1000/tps*0.65);
+    startAnim(aevs,dur,null);
   }
+}
+function renderLoop(ts){
+  if(!running)return;
   render();
   if(animating){
     const p=Math.min((ts-animStart)/animDur,1);
     drawOverlay(p);
     if(p>=1)finishAnim();
   }
-  runRaf=requestAnimationFrame(runFrame);
+  runRaf=requestAnimationFrame(renderLoop);
 }
 function startRun(){
-  running=true;lastMs=performance.now()-1000/tps;
+  running=true;
   document.getElementById('rb').textContent='Pause';
-  runRaf=requestAnimationFrame(runFrame);
+  tickTimer=setInterval(runTick,1000/tps);
+  runRaf=requestAnimationFrame(renderLoop);
 }
 function stopRun(){
   running=false;
+  if(tickTimer){clearInterval(tickTimer);tickTimer=null;}
   if(runRaf){cancelAnimationFrame(runRaf);runRaf=null;}
   const b=document.getElementById('rb');
   if(b)b.textContent='Run';
@@ -787,7 +786,11 @@ function resetSim(){
   document.getElementById('hc').style.display='none';
   enBtn();updatePanel();render();
 }
-function updSpd(v){tps=parseInt(v);document.getElementById('sdl').textContent=tps+' t/s';}
+function updSpd(v){
+  tps=parseInt(v);
+  document.getElementById('sdl').textContent=tps+' t/s';
+  if(running){clearInterval(tickTimer);tickTimer=setInterval(runTick,1000/tps);}
+}
 
 render();
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change',render);
