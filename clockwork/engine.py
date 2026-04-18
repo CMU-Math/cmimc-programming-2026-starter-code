@@ -1,5 +1,5 @@
 from typing import List, Tuple, Optional, Dict, Any
-import json
+import json, bisect
 
 MAX_STEPS = 360 * 1000000
 ops = ["give", "take", "drop", "gen", "copy", "send", "ifzflip", "ifzhalt"]
@@ -22,7 +22,7 @@ class Marker:
         self.value = value
 
 class ClockworkSimulator:
-    def __init__(self, bitwidth: int, operations: int, rings: List[List[Marker]], inputs: int, debug: bool = False):
+    def __init__(self, bitwidth: int, operations: List[str], rings: List[List[Marker]], inputs: int, debug: bool = False):
         self.bitwidth = bitwidth
         self.bitmax = 2 ** bitwidth
         self.operations = operations
@@ -30,6 +30,30 @@ class ClockworkSimulator:
         self.debug = debug
         self.inputs = inputs
 
+        # layer_alignments[k] maps offset -> list of (i1, i2, j1, j2)
+        # sorted clockwise from 0° (the pair's alignment angle).
+        # Since all rotating rings share one global offset, a pair (k, k+1) aligns
+        # iff offset == (stationary.pos - rotating.pos) % 360.
+        num_layers = len(rings) - 1
+        self.layer_alignments = [{} for _ in range(num_layers)]
+        offsets_set = set()
+        for k in range(num_layers):
+            k_rotating = (k % 2 == 1)
+            bucket = {}
+            for i2, inner in enumerate(rings[k]):
+                for j2, outer in enumerate(rings[k + 1]):
+                    if k_rotating:
+                        offset = (outer.original - inner.original) % 360
+                        angle = outer.original
+                    else:
+                        offset = (inner.original - outer.original) % 360
+                        angle = inner.original
+                    bucket.setdefault(offset, []).append((angle, k, i2, k + 1, j2))
+                    offsets_set.add(offset)
+            for offset, entries in bucket.items():
+                entries.sort(key=lambda e: e[0])
+                self.layer_alignments[k][offset] = [(e[1], e[2], e[3], e[4]) for e in entries]
+        self.offsets_sorted = sorted(offsets_set)
         self.reset()
 
     def reset(self) -> None:
@@ -40,6 +64,7 @@ class ClockworkSimulator:
 
         self.dir = 1
         self._step = 0
+        self.offset = 0
     
     def inject(self, inp: List[int]) -> None:
         if len(inp) != self.inputs:
@@ -83,37 +108,42 @@ class ClockworkSimulator:
 
 
     def step(self) -> Optional[int]:
-        if self._step >= MAX_STEPS:
+        if self._step >= MAX_STEPS or not self.offsets_sorted:
+            self._step = MAX_STEPS
             return None
-        self._step += 1
+        n = len(self.offsets_sorted)
+        if self.dir == 1:
+            idx = bisect.bisect_right(self.offsets_sorted, self.offset) % n
+            next_off = self.offsets_sorted[idx]
+            delta = (next_off - self.offset) % 360
+            if delta == 0:
+                delta = 360
+        else:
+            idx = bisect.bisect_left(self.offsets_sorted, self.offset) - 1
+            next_off = self.offsets_sorted[idx]
+            delta = (self.offset - next_off) % 360
+            if delta == 0:
+                delta = 360
 
-        connections = []
+        if self._step + delta > MAX_STEPS:
+            self._step = MAX_STEPS
+            return None
+        self._step += delta
+        self.offset = next_off
 
-        for i in range(1, len(self.rings), 2):
-            for j, m in enumerate(self.rings[i]):
-                m.pos = (m.pos + self.dir + 360) % 360
-                for k, mark in enumerate(self.rings[i - 1]):
-                    if mark.pos == m.pos:
-                        connections.append([i - 1, k, i, j])
-                if i + 1 != len(self.rings):
-                    for k, mark in enumerate(self.rings[i + 1]):
-                        if mark.pos == m.pos:
-                            connections.append([i, j, i + 1, k])
-
-        connections.sort(key=lambda c: (c[0], self.rings[c[0]][c[1]].pos))
-        
-        index = 0
-        i = 1
-        while i < self.bitmax:
-            for c in connections:
-                m1 = self.rings[c[0]][c[1]]
-                m2 = self.rings[c[2]][c[3]]
-                if m1.bitstring & m2.bitstring & i > 0:
-                    ret = self.handle_op(c[0], c[1], c[2], c[3], self.operations[index])
-                    if ret:
-                        return self.rings[0][0].value
-            i *= 2
-            index += 1
+        for bit_idx in range(self.bitwidth):
+            bit = 1 << bit_idx
+            for layer in self.layer_alignments:
+                entries = layer.get(self.offset)
+                if not entries:
+                    continue
+                for (i1, i2, j1, j2) in entries:
+                    m1 = self.rings[i1][i2]
+                    m2 = self.rings[j1][j2]
+                    if m1.bitstring & m2.bitstring & bit:
+                        if self.handle_op(i1, i2, j1, j2, self.operations[bit_idx]):
+                            return self.rings[0][0].value
+        return None
 
     def initialize(self, inp: List[int]) -> None:
         self.reset()
