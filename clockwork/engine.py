@@ -1,7 +1,7 @@
 from typing import List, Tuple, Optional, Dict, Any
 import json, bisect
 
-MAX_STEPS = 360 * 1000000
+MAX_STEPS = 360 * 100000
 ops = ["give", "take", "drop", "gen", "copy", "send", "ifzflip", "ifzhalt"]
 
 class ClockworkResult:
