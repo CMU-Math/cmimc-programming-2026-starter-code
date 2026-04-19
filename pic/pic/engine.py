@@ -82,8 +82,8 @@ class Engine:
         requests_answered_one = sum(1 for m in messages_two if m is not None)
         requests_answered_two = sum(1 for m in messages_one if m is not None)
 
-        score_one = mae_one + 0.25 * mae_two + 0.25 * (requests_answered_one / n) ** 2 + 0.25 * (responses_one / n) ** 2
-        score_two = mae_two + 0.25 * mae_one + 0.25 * (requests_answered_two / n) ** 2 + 0.25 * (responses_two / n) ** 2
+        score_one = mae_one + 0.5 * mae_two + 0.25 * (requests_answered_one / n) ** 2 + 0.1 * (responses_one / n) ** 2
+        score_two = mae_two + 0.5 * mae_one + 0.25 * (requests_answered_two / n) ** 2 + 0.1 * (responses_two / n) ** 2
 
         if return_images:
             return (score_one, score_two), (og_pic, corrupt_pic_one, corrupt_pic_two, player_pic_one, player_pic_two)
