@@ -65,12 +65,21 @@ class Engine:
         total_pixels = len(og_pic) * len(og_pic[0])
         n = len(og_pic)  # image side length
 
-        # A None value in a recovered image counts as the maximum per-pixel error (1.0).
+        # A None value, missing row, short row, or non-numeric value in a
+        # recovered image counts as the maximum per-pixel error (1.0).
         def _mae(recovered, original):
-            return sum(
-                sum(1.0 if r is None else abs(r - o) for r, o in zip(row_r, row_o))
-                for row_r, row_o in zip(recovered, original)
-            ) / total_pixels
+            if not isinstance(recovered, list):
+                return 1.0
+            total = 0.0
+            for i, row_o in enumerate(original):
+                row_r = recovered[i] if i < len(recovered) and isinstance(recovered[i], list) else []
+                for j, o in enumerate(row_o):
+                    r = row_r[j] if j < len(row_r) else None
+                    if not isinstance(r, (int, float)) or isinstance(r, bool):
+                        total += 1.0
+                    else:
+                        total += min(1.0, abs(r - o))
+            return total / total_pixels
 
         mae_one = _mae(player_pic_one, og_pic)
         mae_two = _mae(player_pic_two, og_pic)
